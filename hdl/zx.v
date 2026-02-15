@@ -19,6 +19,7 @@ module zx
 	input  wire       clock,  // clock 56.7504 MHz
 	input  wire       power,
 	input  wire       reset,
+	output wire       rfsh,
 	input  wire       nmi,
 
 	output wire       cep1x,  // pixel clock enable
@@ -30,6 +31,7 @@ module zx
 	output wire[17:0] memA2,  // cpu memory
 	output wire[ 7:0] memD2,
 	input  wire[ 7:0] memQ2,
+	output wire       memR2,
 	output wire       memW2,
 
 	output wire       hblank, // video
@@ -72,21 +74,25 @@ module zx
 );
 //-------------------------------------------------------------------------------------------------
 
+reg km = 1'b1;
+always @(posedge clock) if(joy1[4]) km <= 0; else if(!mbtns[1]) km <= 1'b1;
+
 wire addr00 = !a[15] && !a[14];
 wire addr01 = !a[15] &&  a[14];
 wire addr10 =  a[15] && !a[14];
 wire addr11 =  a[15] &&  a[14];
 
-wire ioFE   = !iorq && !a[0];                       // ula
-wire ioDF   = !iorq && !a[5];                       // kempston
-wire io3F   = !iorq && a[7:0] == 8'h3F;             // usd
-wire ioFFFD = !iorq && addr11 && !a[1];             // psg
-wire io7FFD = !iorq && addr01 && !a[1];             // +2 mapping
-wire io1FFD = !iorq && a[15:12] == 4'h1 && !a[1];   // +3 mapping
-wire io3FFD = !iorq && a[15:13] == 3'b001 && !a[1]; // fdd
-wire ioF3DF = !iorq && a[10:8] == 3'b011 && !a[5];  // k-mouse x axis
-wire ioF7DF = !iorq && a[10:8] == 3'b111 && !a[5];  // k-mouse y axis
-wire ioFEDF = !iorq && a[ 9:8] == 2'b10  && !a[5];  // k-mouse buttons
+wire ioFE   = !iorq && !a[0];                            // ula
+wire ioDF   = !iorq && !a[5];                            // kempston 1
+wire ioF7   = !iorq && !a[3];                            // kempston 2
+wire io3F   = !iorq && a[7:0] == 8'h3F;                  // usd
+wire ioFFFD = !iorq && addr11 && !a[1];                  // psg
+wire io7FFD = !iorq && addr01 && !a[1];                  // +2 mapping
+wire io1FFD = !iorq && a[15:12] == 4'h1 && !a[1];        // +3 mapping
+wire io3FFD = !iorq && a[15:13] == 3'b001 && !a[1];      // fdd
+wire ioF3DF = !iorq && a[10:8] == 3'b011 && !a[5] && km; // k-mouse x axis
+wire ioF7DF = !iorq && a[10:8] == 3'b111 && !a[5] && km; // k-mouse y axis
+wire ioFEDF = !iorq && a[ 9:8] == 2'b10  && !a[5] && km; // k-mouse buttons
 
 //-------------------------------------------------------------------------------------------------
 
@@ -145,6 +151,7 @@ cpu cpu
 	.reset  (reset  ),
 	.iorq   (iorq   ),
 	.mreq   (mreq   ),
+	.rfsh   (rfsh   ),
 	.irq    (irq    ),
 	.nmi    (nmi    ),
 	.rd     (rd     ),
@@ -206,6 +213,7 @@ assign memA1 = { vmmPage, vduA };
 
 assign memA2 = { allram ? { 1'b1, allramPage } : addr00 ? { 1'b0, romPage } : { 1'b1, ramPage }, a[13:0] };
 assign memD2 = q;
+assign memR2 = !mreq && !rd;
 assign memW2 = !mreq && !wr && (allram || a[15] || a[14]);
 
 //-------------------------------------------------------------------------------------------------
@@ -283,9 +291,10 @@ audio audio
 //-------------------------------------------------------------------------------------------------
 
 wire[7:0] keyA = a[15:8];
-wire[5:0] if2l = ~{ joy1[5], joy1[1], joy1[0], joy1[2], joy1[3], joy1[4] };
-wire[5:0] if2r = ~{ joy2[5], joy2[1], joy2[0], joy2[2], joy2[3], joy2[4] };
 wire[4:0] keyQ;
+
+wire[4:0] if21 = ~joy1[4:0];
+wire[4:0] if22 = ~joy2[4:0];
 
 keyboard keyboard
 (
@@ -293,8 +302,8 @@ keyboard keyboard
 	.strb   (strb   ),
 	.make   (make   ),
 	.code   (code   ),
-	.joy1   (if2l   ),
-	.joy2   (if2r   ),
+	.joy1   (if21   ),
+	.joy2   (if22   ),
 	.a      (keyA   ),
 	.q      (keyQ   )
 );
@@ -343,7 +352,8 @@ assign d
 	: ioF3DF ? xaxis
 	: ioF7DF ? yaxis
 	: ioFEDF ? { 5'b11111, mbtns }
-	: ioDF   ? joy1 | joy2
+	: ioDF   ? joy1
+	: ioF7   ? joy2
 	: ioFE   ? { 1'b1, ear, 1'b1, keyQ }
 	: 8'hFF;
 
